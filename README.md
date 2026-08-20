@@ -179,6 +179,66 @@ client/
 
 ---
 
+## Deployment
+
+The two halves deploy to **different** hosts, and that split is not optional.
+
+> **Socket.IO cannot run on Vercel.** Vercel's serverless functions are request/response and do not hold long-lived WebSocket connections. Long-polling is not a workaround either: consecutive polls can land on different function instances, and the in-memory presence Map would be per-instance. The backend needs a host that keeps a Node process alive.
+
+So: **frontend on Vercel, backend on a WebSocket-capable host** (Render, Railway, Fly.io, Heroku — all equivalent here).
+
+### 1. Database — MongoDB Atlas
+
+Create a free M0 cluster, add a database user, and under **Network Access** allow `0.0.0.0/0` (hosting providers do not publish fixed egress IPs). Copy the `mongodb+srv://...` connection string.
+
+### 2. Backend — Render
+
+The repo includes [`render.yaml`](render.yaml), so **New → Blueprint** and pointing Render at this repo picks up the settings. Or configure it by hand:
+
+| Setting | Value |
+|---|---|
+| Root directory | `server` |
+| Build command | `npm ci` |
+| Start command | `npm start` |
+| Health check path | `/api/health` |
+
+Environment variables:
+
+| Key | Value |
+|---|---|
+| `MONGODB_URI` | Your Atlas connection string |
+| `CLIENT_ORIGIN` | Your Vercel URL, e.g. `https://your-app.vercel.app` — **no trailing slash** |
+| `PISTON_API_URL` | A Piston instance you can reach (see [Code execution](#code-execution)) |
+
+Do **not** set `PORT`; the host injects it and `config/env.js` already reads it.
+
+Note the free tier sleeps after inactivity, so the first connection after an idle period takes ~30s to wake. The client shows "Reconnecting…" and joins automatically once it is up.
+
+### 3. Frontend — Vercel
+
+Import the GitHub repo, then:
+
+| Setting | Value |
+|---|---|
+| Root directory | `client` ← **must be set**, this is a monorepo |
+| Framework preset | Vite (auto-detected) |
+
+Environment variable:
+
+| Key | Value |
+|---|---|
+| `VITE_SERVER_URL` | Your backend URL, e.g. `https://codesync-server.onrender.com` |
+
+`VITE_*` variables are inlined **at build time**, not read at runtime — so after changing `VITE_SERVER_URL` you must redeploy for it to take effect.
+
+[`client/vercel.json`](client/vercel.json) provides the SPA rewrite that sends every unmatched path to `index.html`. Without it a refresh on `/room/:roomId` returns 404, which would break the "a refresh does not lose your work" behaviour that the whole persistence feature rests on.
+
+### 4. Close the loop
+
+`CLIENT_ORIGIN` on the backend and `VITE_SERVER_URL` on the frontend must point at each other. If they disagree the browser blocks the connection and the sidebar sits at "Reconnecting…" — check the browser console for a CORS error naming the origin the server actually expects.
+
+---
+
 ## Known limitations
 
 - **Concurrent edits can clobber each other.** That is what last-write-wins means; see above.

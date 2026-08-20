@@ -1,0 +1,34 @@
+# Render blueprint for the CodeSync backend.
+#
+# The server needs a long-lived process for Socket.IO, which is why it does
+# not live on Vercel alongside the frontend. Any host that keeps a Node
+# process alive and supports WebSockets works the same way — Railway, Fly.io,
+# Heroku — this file just automates Render.
+services:
+  - type: web
+    name: codesync-server
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm ci
+    startCommand: npm start
+
+    # Render pings this to decide whether the instance is live.
+    healthCheckPath: /api/health
+
+    envVars:
+      # Render injects PORT itself; config/env.js already reads it.
+
+      # MongoDB Atlas connection string. Marked sync:false so the secret is
+      # entered in the Render dashboard rather than committed here.
+      - key: MONGODB_URI
+        sync: false
+
+      # Must be the exact origin Vercel serves the frontend from, e.g.
+      # https://collab-coded-editor.vercel.app  (no trailing slash).
+      # Comma-separate to allow several, e.g. preview deployments.
+      - key: CLIENT_ORIGIN
+        sync: false
+
+      - key: PISTON_API_URL
+        value: https://emkc.org/api/v2/piston/execute
