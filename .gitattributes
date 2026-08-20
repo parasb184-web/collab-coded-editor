@@ -1,0 +1,6 @@
+# Normalise line endings so the repo stays LF regardless of contributor OS.
+* text=auto eol=lf
+
+# Binary assets — never touch these.
+*.png binary
+*.svg text eol=lf
