@@ -477,6 +477,9 @@ body {
   flex-direction: column;
   flex: 1;
   min-width: 0;
+  /* Required for the column layout on narrow screens, where .room__body
+     stacks: without it this item refuses to shrink below its content. */
+  min-height: 0;
 }
 
 .editor {
@@ -497,9 +500,7 @@ body {
 .output {
   display: flex;
   flex-direction: column;
-  height: 210px;
-  flex-shrink: 0;
-  border-top: 1px solid var(--border);
+  height: 100%;
   background: var(--panel);
 }
 
@@ -544,8 +545,51 @@ body {
   color: var(--text-muted);
 }
 
-.output__header .btn {
+.output__clear {
   margin-left: auto;
+}
+
+/* Header toggle doubles as the collapse control. */
+.output__toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  margin-left: -4px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-muted);
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.output__toggle:hover {
+  color: var(--text);
+}
+
+.output__toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.output__hidden-hint {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-style: italic;
+}
+
+.chevron {
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition: transform 0.18s ease;
+}
+
+.chevron--up {
+  transform: rotate(-135deg) translate(-1px, -1px);
 }
 
 .output__body {
@@ -575,6 +619,105 @@ body {
 }
 
 /* --------------------------------------------------------------------------
+   Resizer between editor and output
+   -------------------------------------------------------------------------- */
+
+.resizer {
+  position: relative;
+  height: 7px;
+  flex-shrink: 0;
+  border-top: 1px solid var(--border);
+  background: var(--border-soft);
+  cursor: row-resize;
+  transition: background 0.15s ease;
+  /* Stops the browser turning a vertical drag into a scroll on touch. */
+  touch-action: none;
+}
+
+.resizer:hover,
+.resizer:focus-visible {
+  background: var(--accent-strong);
+  outline: none;
+}
+
+.resizer:hover .resizer__grip,
+.resizer:focus-visible .resizer__grip {
+  background: #fff;
+  opacity: 0.9;
+}
+
+.resizer__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 38px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--text-muted);
+  opacity: 0.45;
+  transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+/* While dragging, keep the resize cursor everywhere and kill text selection. */
+body.is-resizing {
+  cursor: row-resize;
+  user-select: none;
+}
+
+/* --------------------------------------------------------------------------
+   Small shared bits: spinner, kbd
+   -------------------------------------------------------------------------- */
+
+.spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+  flex-shrink: 0;
+}
+
+.spinner--sm {
+  width: 11px;
+  height: 11px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.kbd {
+  display: inline-block;
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+/* Legible against the blue Run button. */
+.kbd--on-primary {
+  border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(0, 0, 0, 0.22);
+  color: #e8f0ff;
+}
+
+.btn--copied {
+  color: var(--success);
+  border-color: rgba(63, 185, 80, 0.45);
+}
+
+/* --------------------------------------------------------------------------
    Toasts
    -------------------------------------------------------------------------- */
 
@@ -590,20 +733,74 @@ body {
 }
 
 .toast {
-  display: block;
-  max-width: 320px;
-  padding: 10px 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  max-width: 340px;
+  padding: 10px 10px 10px 12px;
   border: 1px solid var(--border);
   border-left-width: 3px;
   border-radius: var(--radius-sm);
   background: var(--panel-raised);
   color: var(--text);
-  font-family: inherit;
   font-size: 13px;
   text-align: left;
-  cursor: pointer;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   animation: toast-in 0.18s ease-out;
+}
+
+.toast__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  margin-top: 1px;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.toast--success .toast__icon {
+  background: rgba(63, 185, 80, 0.16);
+  color: var(--success);
+}
+
+.toast--error .toast__icon {
+  background: rgba(248, 81, 73, 0.16);
+  color: var(--danger);
+}
+
+.toast--info .toast__icon {
+  background: rgba(88, 166, 255, 0.16);
+  color: var(--accent);
+}
+
+.toast__message {
+  flex: 1;
+  line-height: 1.45;
+}
+
+.toast__close {
+  padding: 0 3px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.toast__close:hover {
+  color: var(--text);
+}
+
+.toast__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 3px;
 }
 
 .toast--success {
@@ -655,11 +852,67 @@ body {
     margin-left: 0;
   }
 
-  .sidebar {
-    width: 160px;
+  /* A 160px column wastes too much of a small screen, so the sidebar turns
+     into a horizontal strip above the editor instead. */
+  .room__body {
+    flex-direction: column;
   }
 
-  .output {
-    height: 170px;
+  .sidebar {
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 0 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+  }
+
+  .sidebar__label {
+    padding: 0;
+    white-space: nowrap;
+  }
+
+  .userlist {
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .userlist__items {
+    display: flex;
+    gap: 4px;
+    padding: 8px 0;
+  }
+
+  .user__name {
+    max-width: 90px;
+  }
+
+  .sidebar__footer {
+    flex-direction: row;
+    gap: 12px;
+    padding: 0;
+    border-top: none;
+    white-space: nowrap;
+  }
+
+  .toast-stack {
+    right: 12px;
+    left: 12px;
+    bottom: 12px;
+    align-items: stretch;
+  }
+
+  .toast {
+    max-width: none;
+  }
+}
+
+/* The shortcut hint is the first thing to go when space is tight. */
+@media (max-width: 620px) {
+  .kbd--on-primary {
+    display: none;
   }
 }

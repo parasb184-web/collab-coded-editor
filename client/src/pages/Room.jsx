@@ -16,6 +16,26 @@ const API_BASE = import.meta.env.VITE_SERVER_URL || '';
 const STARTERS = new Set(LANGUAGES.map((lang) => lang.starter));
 const isDisposableBuffer = (text) => text.trim() === '' || STARTERS.has(text);
 
+/** Output panel sizing. The editor keeps at least MIN_EDITOR_HEIGHT px. */
+const OUTPUT_HEIGHT_KEY = 'codesync:outputHeight';
+const DEFAULT_OUTPUT_HEIGHT = 210;
+const MIN_OUTPUT_HEIGHT = 110;
+const MIN_EDITOR_HEIGHT = 160;
+/** Mirrors the height of `.resizer` in styles.css. */
+const RESIZER_HEIGHT = 7;
+
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+/** localStorage throws in some privacy modes, so every access is guarded. */
+function readStoredHeight() {
+  try {
+    const saved = Number(localStorage.getItem(OUTPUT_HEIGHT_KEY));
+    return Number.isFinite(saved) && saved >= MIN_OUTPUT_HEIGHT ? saved : DEFAULT_OUTPUT_HEIGHT;
+  } catch {
+    return DEFAULT_OUTPUT_HEIGHT;
+  }
+}
+
 export default function Room() {
   const { roomId } = useParams();
   const location = useLocation();
@@ -42,6 +62,13 @@ export default function Room() {
   const [runResult, setRunResult] = useState(null);
   const [runError, setRunError] = useState(null);
 
+  const [outputHeight, setOutputHeight] = useState(readStoredHeight);
+  const [isOutputCollapsed, setIsOutputCollapsed] = useState(false);
+  const [justCopied, setJustCopied] = useState(false);
+
+  /** Guards the Run shortcut against firing while a run is already in flight. */
+  const isRunningRef = useRef(false);
+
   /** The single socket instance for this room. */
   const socketRef = useRef(null);
   /** Imperative handle onto Monaco (applyRemote / getValue / focus). */
@@ -51,6 +78,8 @@ export default function Room() {
    * earlier render and would otherwise close over a stale value.
    */
   const languageRef = useRef(DEFAULT_LANGUAGE);
+  /** The editor+output column, measured when clamping the output height. */
+  const workspaceRef = useRef(null);
 
   // Without a name we cannot join — bounce back to Home with the room prefilled.
   useEffect(() => {
@@ -173,6 +202,104 @@ export default function Room() {
   }, [roomId, username, navigate, push]);
 
   /* ------------------------------------------------------------------ */
+  /* Output panel: resize + collapse                                     */
+  /* ------------------------------------------------------------------ */
+
+  // Persist the chosen height so the layout survives a refresh.
+  useEffect(() => {
+    try {
+      localStorage.setItem(OUTPUT_HEIGHT_KEY, String(outputHeight));
+    } catch {
+      // Private mode / blocked storage — the layout just resets next time.
+    }
+  }, [outputHeight]);
+
+  /**
+   * Largest the output may grow while leaving the editor usable.
+   *
+   * Measured against the workspace column rather than the window: the topbar
+   * (which wraps to two rows on narrow screens) and the sidebar strip also eat
+   * vertical space, so window.innerHeight would let the output squeeze the
+   * editor down to a few pixels on a small viewport.
+   */
+  const maxOutputHeight = () => {
+    const available = workspaceRef.current?.clientHeight ?? window.innerHeight;
+    // The divider sits between the two, so it comes out of the budget as well.
+    return Math.max(MIN_OUTPUT_HEIGHT, available - MIN_EDITOR_HEIGHT - RESIZER_HEIGHT);
+  };
+
+  const resizeTo = useCallback((next) => {
+    setOutputHeight(clamp(next, MIN_OUTPUT_HEIGHT, maxOutputHeight()));
+  }, []);
+
+  /**
+   * Drag the divider between editor and output.
+   *
+   * Pointer events (not mouse events) so a trackpad, touch screen or stylus
+   * all work, and setPointerCapture keeps the drag alive even when the cursor
+   * crosses into the Monaco iframe-like surface below.
+   */
+  function startResize(event) {
+    event.preventDefault();
+    if (isOutputCollapsed) setIsOutputCollapsed(false);
+
+    const startY = event.clientY;
+    const startHeight = outputHeight;
+    const handle = event.currentTarget;
+
+    handle.setPointerCapture?.(event.pointerId);
+    document.body.classList.add('is-resizing');
+
+    const onMove = (moveEvent) => {
+      // Dragging up grows the panel, hence the inverted delta.
+      resizeTo(startHeight - (moveEvent.clientY - startY));
+    };
+
+    const onUp = () => {
+      handle.releasePointerCapture?.(event.pointerId);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onUp);
+      handle.removeEventListener('pointercancel', onUp);
+      document.body.classList.remove('is-resizing');
+    };
+
+    handle.addEventListener('pointermove', onMove);
+    handle.addEventListener('pointerup', onUp);
+    handle.addEventListener('pointercancel', onUp);
+  }
+
+  /** The divider is focusable, so arrow keys must resize it too. */
+  function handleResizeKey(event) {
+    const STEP = event.shiftKey ? 40 : 12;
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      resizeTo(outputHeight + STEP);
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      resizeTo(outputHeight - STEP);
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      setIsOutputCollapsed((collapsed) => !collapsed);
+    }
+  }
+
+  // Shrink the panel if the window becomes too short to honour the saved size.
+  useEffect(() => {
+    const onResize = () => setOutputHeight((current) => clamp(current, MIN_OUTPUT_HEIGHT, maxOutputHeight()));
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  /** Brief inline confirmation on the copy button, alongside the toast. */
+  const copyTimer = useRef(null);
+  function flashCopied() {
+    setJustCopied(true);
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setJustCopied(false), 1600);
+  }
+  useEffect(() => () => clearTimeout(copyTimer.current), []);
+
+  /* ------------------------------------------------------------------ */
   /* Editor + toolbar handlers                                           */
   /* ------------------------------------------------------------------ */
 
@@ -201,9 +328,13 @@ export default function Room() {
     }
   }
 
-  async function handleRun() {
+  const handleRun = useCallback(async () => {
+    // The keyboard shortcut can fire while a request is already in flight.
+    if (isRunningRef.current) return;
+
     const code = editorApiRef.current?.getValue() ?? '';
 
+    isRunningRef.current = true;
     setIsRunning(true);
     setRunResult(null);
     setRunError(null);
@@ -226,14 +357,37 @@ export default function Room() {
     } catch {
       setRunError('Could not reach the execution service. Is the backend running?');
     } finally {
+      isRunningRef.current = false;
       setIsRunning(false);
     }
-  }
+  }, []);
+
+  /* ------------------------------------------------------------------ */
+  /* Keyboard shortcut                                                   */
+  /* ------------------------------------------------------------------ */
+
+  /**
+   * Ctrl/Cmd+Enter runs the code from anywhere on the page. Monaco registers
+   * the same shortcut internally (see EditorPane) for when the editor has
+   * focus and swallows the keydown before it reaches window.
+   */
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        event.preventDefault();
+        handleRun();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleRun]);
+
 
   async function handleCopyRoomId() {
     try {
       await navigator.clipboard.writeText(roomId);
       push('Room ID copied to clipboard.', 'success');
+      flashCopied();
       return;
     } catch {
       // The clipboard API needs a secure context; fall back for plain http.
@@ -252,6 +406,7 @@ export default function Room() {
       copied ? 'Room ID copied to clipboard.' : 'Copy failed — select the ID manually.',
       copied ? 'success' : 'error'
     );
+    if (copied) flashCopied();
   }
 
   function handleLeave() {
@@ -273,8 +428,13 @@ export default function Room() {
         <div className="topbar__room">
           <span className="topbar__roomlabel">Room</span>
           <code className="topbar__roomid" title={roomId}>{roomId}</code>
-          <button type="button" className="btn btn--ghost btn--sm" onClick={handleCopyRoomId}>
-            Copy ID
+          <button
+            type="button"
+            className={`btn btn--ghost btn--sm ${justCopied ? 'btn--copied' : ''}`}
+            onClick={handleCopyRoomId}
+            title="Copy this room's ID so you can share it"
+          >
+            {justCopied ? '✓ Copied' : 'Copy ID'}
           </button>
         </div>
 
@@ -290,8 +450,24 @@ export default function Room() {
             </select>
           </label>
 
-          <button type="button" className="btn btn--primary" onClick={handleRun} disabled={isRunning}>
-            {isRunning ? 'Running…' : 'Run'}
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={handleRun}
+            disabled={isRunning}
+            title="Run the code (Ctrl+Enter)"
+          >
+            {isRunning ? (
+              <>
+                <span className="spinner spinner--sm" aria-hidden="true" />
+                Running…
+              </>
+            ) : (
+              <>
+                Run
+                <kbd className="kbd kbd--on-primary">Ctrl ↵</kbd>
+              </>
+            )}
           </button>
 
           <button type="button" className="btn btn--danger" onClick={handleLeave}>
@@ -321,18 +497,43 @@ export default function Room() {
           </div>
         </aside>
 
-        <main className="workspace">
-          <EditorPane ref={editorApiRef} language={language} onChange={handleLocalChange} />
-
-          <OutputPanel
-            result={runResult}
-            error={runError}
-            isRunning={isRunning}
-            onClear={() => {
-              setRunResult(null);
-              setRunError(null);
-            }}
+        <main className="workspace" ref={workspaceRef}>
+          <EditorPane
+            ref={editorApiRef}
+            language={language}
+            onChange={handleLocalChange}
+            onRunShortcut={handleRun}
           />
+
+          {/* Drag (or focus + arrow keys) to resize the output panel. */}
+          <div
+            className="resizer"
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Resize output panel"
+            aria-valuenow={isOutputCollapsed ? 0 : Math.round(outputHeight)}
+            tabIndex={0}
+            onPointerDown={startResize}
+            onKeyDown={handleResizeKey}
+            onDoubleClick={() => setIsOutputCollapsed((collapsed) => !collapsed)}
+            title="Drag to resize · double-click to collapse"
+          >
+            <span className="resizer__grip" aria-hidden="true" />
+          </div>
+
+          <div style={{ height: isOutputCollapsed ? 'auto' : outputHeight, flexShrink: 0 }}>
+            <OutputPanel
+              result={runResult}
+              error={runError}
+              isRunning={isRunning}
+              isCollapsed={isOutputCollapsed}
+              onToggleCollapse={() => setIsOutputCollapsed((collapsed) => !collapsed)}
+              onClear={() => {
+                setRunResult(null);
+                setRunError(null);
+              }}
+            />
+          </div>
         </main>
       </div>
 

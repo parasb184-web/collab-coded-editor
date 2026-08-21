@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useEffect } from 'react';
 import Editor from '@monaco-editor/react';
 import { getLanguage } from '../constants/languages.js';
 
@@ -10,7 +10,7 @@ import { getLanguage } from '../constants/languages.js';
  * `applyRemote` imperative handle. That is what keeps the echo loop closed —
  * see the comment on `isApplyingRemote` below.
  */
-const EditorPane = forwardRef(function EditorPane({ language, onChange }, ref) {
+const EditorPane = forwardRef(function EditorPane({ language, onChange, onRunShortcut }, ref) {
   const editorRef = useRef(null);
 
   /**
@@ -26,6 +26,12 @@ const EditorPane = forwardRef(function EditorPane({ language, onChange }, ref) {
 
   /** Text that arrived before Monaco finished loading, replayed on mount. */
   const pendingRemote = useRef(null);
+
+  /** Monaco commands are registered once, so read the handler through a ref. */
+  const onRunShortcutRef = useRef(onRunShortcut);
+  useEffect(() => {
+    onRunShortcutRef.current = onRunShortcut;
+  }, [onRunShortcut]);
 
   useImperativeHandle(ref, () => ({
     /** Overwrite the buffer with an incoming snapshot (last-write-wins). */
@@ -68,8 +74,17 @@ const EditorPane = forwardRef(function EditorPane({ language, onChange }, ref) {
     },
   }));
 
-  function handleMount(editor) {
+  function handleMount(editor, monaco) {
     editorRef.current = editor;
+
+    // Ctrl/Cmd+Enter runs the code. Registering through Monaco (rather than
+    // only a window listener) matters because the editor swallows most
+    // keydowns while it has focus — which is exactly when you want to run.
+    // The ref indirection keeps the command pointing at the latest handler
+    // instead of the one captured at mount.
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+      onRunShortcutRef.current?.();
+    });
 
     // Apply anything that arrived during Monaco's async load.
     if (pendingRemote.current !== null) {
@@ -99,7 +114,12 @@ const EditorPane = forwardRef(function EditorPane({ language, onChange }, ref) {
         language={getLanguage(language).monaco}
         onMount={handleMount}
         onChange={handleChange}
-        loading={<div className="editor__loading">Loading editor…</div>}
+        loading={
+          <div className="editor__loading">
+            <span className="spinner" aria-hidden="true" />
+            Loading editor…
+          </div>
+        }
         options={{
           fontSize: 14,
           fontFamily: '"JetBrains Mono", "Fira Code", Consolas, monospace',
@@ -111,6 +131,10 @@ const EditorPane = forwardRef(function EditorPane({ language, onChange }, ref) {
           padding: { top: 14, bottom: 14 },
           renderLineHighlight: 'line',
           cursorBlinking: 'smooth',
+          roundedSelection: false,
+          scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+          guides: { indentation: true },
+          bracketPairColorization: { enabled: true },
         }}
       />
     </div>
