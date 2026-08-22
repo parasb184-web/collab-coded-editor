@@ -15,6 +15,10 @@
 
   --accent: #58a6ff;
   --accent-strong: #1f6feb;
+
+  /* Brand gradient for the logo mark. Change these two to re-theme it. */
+  --brand-from: #1f6feb;
+  --brand-to: #58a6ff;
   --success: #3fb950;
   --danger: #f85149;
   --warning: #d29922;
@@ -169,7 +173,7 @@ body {
   width: 44px;
   height: 44px;
   border-radius: 10px;
-  background: linear-gradient(135deg, var(--accent-strong), #8957e5);
+  background: linear-gradient(135deg, var(--brand-from), var(--brand-to));
   color: #fff;
   font-family: var(--mono);
   font-size: 15px;
