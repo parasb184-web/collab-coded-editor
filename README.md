@@ -43,6 +43,7 @@ npm run dev               # http://localhost:5000
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017/codesync` | Where rooms are stored |
 | `CLIENT_ORIGIN` | `http://localhost:5173` | Allowed CORS origins, comma-separated |
 | `PISTON_API_URL` | `https://emkc.org/api/v2/piston/execute` | Code-execution endpoint — see [Code execution](#code-execution) |
+| `EXECUTION_MODE` | `piston` | `piston` or `local`. See [Code execution](#code-execution) — **`local` has no sandbox, never deploy it** |
 
 ### 2. Frontend
 
@@ -87,6 +88,33 @@ The **Run** button POSTs `{ language, code }` to `POST /api/execute`, which forw
 > 3. **Point at any Piston-compatible endpoint** you already have. The request/response shape is unchanged, so only the env var moves.
 >
 > Everything else in the app — editing, sync, presence, persistence — is entirely independent of this and works as-is.
+
+### Local execution (no Piston needed)
+
+If you just want **Run** to work on your own machine, set `EXECUTION_MODE=local` in `server/.env` and restart the server. Code is then compiled and run with the toolchains already installed locally:
+
+| Language | Needs on PATH |
+|---|---|
+| JavaScript | the Node binary running the server (no extra install) |
+| Python | `python` (override with `PYTHON_BIN`, e.g. `python3`) |
+| C++ | `g++` |
+| Java | `javac` and `java` |
+
+> ### ⚠ Local mode has no sandbox
+>
+> Submitted code runs as whoever owns the server process. It can read and write your files, open network connections, and spawn processes. That is fine on your own laptop, and **completely unsafe anywhere else** — this app has no authentication, so on a deployed server anyone who learns a room ID would have arbitrary code execution on that host.
+>
+> `EXECUTION_MODE` therefore defaults to `piston`, must be set deliberately, and the server prints a loud banner at startup whenever local mode is active. **Never set it on a deployment.** Use Piston there — it runs code in a container, on someone else's infrastructure.
+
+What local mode *can* enforce without a container, and does:
+
+| Limit | Default | Setting |
+|---|---|---|
+| Compile timeout | 20 s | `LOCAL_COMPILE_TIMEOUT_MS` |
+| Run timeout | 10 s | `LOCAL_RUN_TIMEOUT_MS` |
+| Max output | 64 KB | `LOCAL_MAX_OUTPUT_BYTES` |
+
+On timeout the whole process tree is killed (`taskkill /T` on Windows), output past the cap is truncated and the process killed rather than buffered, and each run gets a fresh temp directory that is removed afterwards. `GET /api/health` reports the active mode.
 
 The request goes through the backend rather than straight from the browser so that the endpoint stays configurable, the language-to-runtime mapping lives in one place, and rate limits or auth failures come back as readable messages instead of opaque console errors.
 

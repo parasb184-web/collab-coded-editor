@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { config } from '../config/env.js';
 import { LANGUAGES, isSupportedLanguage } from '../config/languages.js';
+import { runLocally } from '../services/localRunner.js';
 
 const router = Router();
 
@@ -29,6 +30,18 @@ router.post('/execute', async (req, res) => {
   }
   if (code.length > MAX_CODE_LENGTH) {
     return res.status(413).json({ error: 'Code is too large to execute.' });
+  }
+
+  // Local mode: use this machine's toolchains instead of a remote service.
+  if (config.executionMode === 'local') {
+    try {
+      return res.json(await runLocally(language, code, stdin));
+    } catch (err) {
+      console.error('[execute] local run failed:', err.message);
+      return res.status(500).json({
+        error: `Local execution failed: ${err.message}`,
+      });
+    }
   }
 
   const runtime = LANGUAGES[language];

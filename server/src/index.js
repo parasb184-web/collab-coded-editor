@@ -17,7 +17,11 @@ app.use(cors({ origin: config.clientOrigins }));
 app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
-  res.json({ status: 'ok', database: isDbReady() ? 'connected' : 'unavailable' });
+  res.json({
+    status: 'ok',
+    database: isDbReady() ? 'connected' : 'unavailable',
+    execution: config.executionMode,
+  });
 });
 
 app.use('/api', executeRoutes);
@@ -36,6 +40,19 @@ await connectDB(config.mongoUri);
 server.listen(config.port, () => {
   console.log(`[server] listening on http://localhost:${config.port}`);
   console.log(`[server] accepting clients from: ${config.clientOrigins.join(', ')}`);
+
+  if (config.executionMode === 'local') {
+    // Loud on purpose: this is the one setting that can hurt you.
+    console.warn('***************************************************************');
+    console.warn('[execute] LOCAL EXECUTION IS ENABLED.');
+    console.warn('[execute] Code from any room runs on this machine with no');
+    console.warn('[execute] sandbox, as this user. Fine on your own laptop.');
+    console.warn('[execute] NEVER enable this on a deployed/public server —');
+    console.warn('[execute] anyone with a room ID would get code execution.');
+    console.warn('***************************************************************');
+  } else {
+    console.log(`[execute] mode: piston (${config.pistonUrl})`);
+  }
 });
 
 /** Don't lose the last 1.5s of typing when the process is stopped. */
